@@ -1,4 +1,4 @@
-import { promises } from "node:dns";
+
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -111,7 +111,12 @@ export function readFile(
 }
 
 //将模型传来的名字和参数字符串，转成写好的两个函数调用
-export function executeTool(root : string, name : string, argsJson : string): string{
+export async function executeTool(
+    root : string, 
+    name : string, 
+    argsJson : string,
+    ask: (question: string)=> Promise<string>,
+): Promise<string>{
     try{
         //把json变成对象
         const args : { 
@@ -119,6 +124,7 @@ export function executeTool(root : string, name : string, argsJson : string): st
             path?: string;
             offset?: number;
             limit?: number;
+            content?: string;
         } = JSON.parse(argsJson);
          
         //如果名字是search_files，就取出query
@@ -136,6 +142,18 @@ export function executeTool(root : string, name : string, argsJson : string): st
                 return "缺少path"
             }
             return readFile(root,filePath,args.offset,args.limit);
+        }
+        if (name ==="write_note") {
+            const filePath = args.path;
+            const content = args.content;
+            if (typeof filePath !== "string" ) {
+                return "缺少path";
+            }
+            if (typeof content !== "string") {
+                return "缺少content";
+            }
+
+            return await write_note(root,filePath,content,ask)
         }
 
         return "未知工具"

@@ -5,6 +5,7 @@ import * as readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { executeTool } from "./tools.js";
 
+
 const apiKey = process.env.OPENAI_API_KEY;
 const baseURL = process.env.OPENAI_BASE_URL;
 const model = process.env.OPENAI_MODEL;
@@ -48,6 +49,22 @@ const tools = [
           limit: { type: "number" },
         },
         required: ["path"],
+      },
+    },
+  },
+
+   {
+    type: "function" as const,
+    function: {
+      name: "write_note",
+      description: "把内容写入一个 Markdown 文件。path 必须以 output/ 开头，比如 output/cheatsheet.md。写入前会请用户确认。",      // 告诉模型这个工具干什么、只能写到哪个目录
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },    // 文件路径，参数名要和后面取值时一致
+          writeContent: { type: "string" },    // 要写入的内容
+        },
+        required: ["path","content"],              // 两个都必填
       },
     },
   },
@@ -101,14 +118,15 @@ while (true) {
       console.log(msg.content);
       break;
     }
-    calls.forEach((call) => {
+    for (const call of calls) {
       if (call.type !== "function") {
-        return;
+        continue;
       }
-      const result = executeTool(
+      const result = await executeTool(
         workdir,
         call.function.name,
         call.function.arguments,
+        (q) => r1.question(q),
       );
 
       messages.push({
@@ -116,7 +134,7 @@ while (true) {
         tool_call_id: call.id,
         content: result,
       });
-    });
+    }
   }
 }
 

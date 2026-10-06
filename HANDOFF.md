@@ -88,7 +88,7 @@
 |------|------|----------|------|
 | `search_files` | 第 1 阶段 | 在资料目录里按文件名和关键词搜索 | 已完成 |
 | `read_file` | 第 1 阶段 | 按范围读取 Markdown | 已完成 |
-| `write_note` | 第 2 阶段 | 在 `output/` 写入总结；先展示将写入的全文，用户确认后再写；**只在本地 CLI 使用，线上不开放** | 函数已写，**还没接入循环** |
+| `write_note` | 第 2 阶段 | 在 `output/` 写入总结；先展示将写入的全文，用户确认后再写；**只在本地 CLI 使用，线上不开放** | **已接入**（2026-10-06，`executeTool` 改成 async，依赖注入 `ask`） |
 | ~~`run_check`~~ | — | **2026-10-05 砍掉**，为了省时间。验收改成人工检查写出来的文件 | 不做 |
 
 不要用开放的 `run_command`。如果以后要恢复 `run_check`，记住：它会执行仓库里的脚本，**限定命令 ≠ 沙箱**，简历里要能讲清楚两者的区别。
@@ -102,7 +102,7 @@
 | 第 0 步 | 脚手架 | `npm start` 打印 `harness ok` | — | **已完成** |
 | 第 1 步 | 只聊天，不挂工具 | 多轮对话，`messages` 累积 | — | **已完成** |
 | 第 1 阶段 | CLI + 手写循环 + `search_files` + `read_file` | 三个只读任务能自主搜、读、答，不用逐步指挥 | — | **用户已验收**（但用户还需要通过讲解关） |
-| 第 2 阶段 | `write_note` 接入 + 最大步数 + API 错误处理 + 清理已知问题 | 写入前必须确认；死循环和网络错误不会让进程崩溃 | 10/26 | **当前** |
+| 第 2 阶段 | `write_note` 接入 + 最大步数 + API 错误处理 + 清理已知问题 | 写入前必须确认；死循环和网络错误不会让进程崩溃 | 10/26 | **主体完成**（2026-10-06），剩清理项 |
 | 第 3 阶段 | 健壮性：流式输出、工具输出截断、上下文管理（滑动窗口或摘要压缩）、JSONL 会话持久化 | 长对话、失败、重启后的行为都能讲清楚 | 11/30 | 未开始 |
 | 第 4 阶段 | 个人分身：用户资料知识库 + Node HTTP 服务 + SSE + 简单聊天页（展示工具调用和出处）+ 限流、预算、防注入 | 本地能完整演示 | 12/31 | 未开始 |
 | 第 5 阶段 | 评测 + 部署：30 道题（含资料外问题和注入攻击），统计编造率和出处准确率；Docker + 云服务器 + HTTPS | 有真实的评测数据，公网可以访问 | 2027/1 月中 | 未开始 |
@@ -328,13 +328,13 @@ npx tsx src/index.ts ./playground
 
 | 问题 | 位置 | 处理 |
 |---|---|---|
-| 内层循环没有最大步数，模型一直调工具就会死循环、一直消耗 token | `src/index.ts` 内层 `while(true)` | 加步数上限，超过就停止并告诉用户 |
-| API 调用没有 try/catch，网络抖动或限流时整个进程会崩溃 | `client.chat.completions.create` | 捕获错误，可以重试 1 到 2 次；失败时保留当前对话 |
+| 内层循环没有最大步数，模型一直调工具就会死循环、一直消耗 token | `src/index.ts` 内层 `while(true)` | **已完成**（MAX_STEPS = 10，调用模型前检查） |
+| API 调用没有 try/catch，网络抖动或限流时整个进程会崩溃 | `client.chat.completions.create` | **已完成**（SDK 默认自动重试 2 次；失败时打印提示、break，user 消息不撤回） |
 | `resolveInside` 防不住软链接逃出工作目录 | `src/tools.ts` | 用 `fs.realpathSync` 解析真实路径后再比较 |
 | `searchFiles` 把所有文件都当 UTF-8 全文读进来，没有大小限制，也不跳过二进制文件 | `src/tools.ts` | 跳过大文件和非文本文件 |
-| 没用到的 import：`node:dns` 的 `promises`，`node:console` 的 `error, log` | `src/tools.ts:1`、`src/index.ts:6` | 删除 |
+| 没用到的 import：`node:dns` 的 `promises`，`node:console` 的 `error, log` | `src/tools.ts:1`、`src/index.ts:6` | **已删除** |
 | 没打印 `res.usage` | 循环里 | 加上，以后评测要用 |
-| `if (msg)` 多余（前面已经 `if (!msg) break`） | `src/index.ts` | 删除 |
+| `if (msg)` 多余（前面已经 `if (!msg) break`） | `src/index.ts` | **已删除** |
 
 ### `write_note`
 
@@ -398,4 +398,6 @@ N、X、Y 必须写真实数字。
 
 ---
 
-**当前进度（2026-10-05）：** 第 1 阶段已验收；第 2 阶段进行中，`write_note` 已写但还没接入循环。下一步：先过讲解关 → 接入 `write_note`（改 async + `for...of`）→ 加最大步数和 API 错误处理 → 清理上表里的问题 → 验收。目标 10/26 完成。
+**当前进度（2026-10-06）：** 第 2 阶段主体完成：最大步数、模型调用出错处理、`write_note` 接入（`forEach` 换成 `for...of`，`executeTool` 改 async 并注入 `ask`），讲解关已过（forEach 与 Promise、`return await` 与 catch、两道路径检查）。**剩余清理项**：`resolveInside` 防软链接（`fs.realpathSync`）、`searchFiles` 跳过大文件和二进制、打印 `res.usage`、`executeTool` 区分参数错误和执行错误。之后进入第 3 阶段（工具输出截断 + 上下文管理）。
+
+上一版进度（2026-10-05）：第 1 阶段已验收；第 2 阶段进行中，`write_note` 已写但还没接入循环。下一步：先过讲解关 → 接入 `write_note`（改 async + `for...of`）→ 加最大步数和 API 错误处理 → 清理上表里的问题 → 验收。目标 10/26 完成。
