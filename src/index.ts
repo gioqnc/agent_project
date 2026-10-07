@@ -69,11 +69,13 @@ const tools = [
     },
   },
 ];
-
+//系统提示词改成常量
+const SYSTEM_PROMPT = "只根据资料目录回答，写明文件路径，文件里没有就说找不到";
+let summary = "";  //更早对话的摘要，一开始是空的
 const messages: ChatCompletionMessageParam[] = [
   {
     role: "system",
-    content: "只根据资料目录回答，写明文件路径，文件里没有就说找不到",
+    content: SYSTEM_PROMPT,
   },
 ];
 
@@ -82,12 +84,35 @@ const r1 = readline.createInterface({ input: stdin, output: stdout });
 const MAX_STEPS = 10;
 const MAX_TOOL_CHARS = 4000;
 const MAX_TURNS = 10; // 最多保留最近几轮对话，包括当前这轮
-//滑动窗口方法
-function trimHistory(messages: ChatCompletionMessageParam[], maxTurns: number){
+
+//生成摘要函数
+const summarize = async(oldSummary: string,dialog: string):
+Promise<string | null> => {
+  try{
+    const res = await client.chat.completions.create({
+      model,
+      messages:[
+        {
+          role: "system",
+          content: "你负责压缩对话记录。把已有摘要和新的对话合并成一份摘要，保留用户问过的问题、得到的结论和引用的文件路径，300 字以内，只输出摘要本身。",
+        },
+        {
+          role: "user",
+          content: `已有摘要： \n${oldSummary || "(无)"}\n\n新的对话: \n${dialog}`,
+        },
+      ],
+    });
+    return res.choices[0]?.message.content ?? null;
+  }catch{
+    return null;
+  }
+};
+//滑动窗口函数
+async function trimHistory(msgs: ChatCompletionMessageParam[], maxTurns: number){
   // 第一步：找出所有 user 消息的下标
   const userIdx: number[] = [];
-  for(let i =0;i < messages.length;i++){
-    if (messages[i].role === "user") {
+  for(let i =0;i < msgs.length;i++){
+    if (msgs[i].role === "user") {
       userIdx.push(i);
     }
   }
@@ -99,8 +124,29 @@ function trimHistory(messages: ChatCompletionMessageParam[], maxTurns: number){
 
    // 第三步：找到"要保留的第一条 user 消息"的下标
   const keepFrom = userIdx[userIdx.length - maxTurns];
-  // 第四步：删掉 system（下标 0）之后、keepFrom 之前的所有消息
-  messages.splice(1,keepFrom - 1);
+  // 第四步：先复制要删除的消息。删掉 system（下标 0）之后、keepFrom 之前的所有消息
+  const removed = msgs.slice(1,keepFrom);
+  const lines: string[] = [];
+  for(const m of removed){
+    if((m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content){
+      lines.push(`${m.role === "user" ? "用户" : "助手"}: ${m.content}`);
+    }
+  }
+  msgs.splice(1,keepFrom - 1);
+
+  const newSummary = await summarize(summary, lines.join("\n"));
+  if (newSummary) {
+    summary = newSummary;
+    console.log(`[summary] ${summary}`);
+  }else{
+    console.log("[summary]生成摘要失败，旧对话已删除，保留原来的摘要");
+  }
+  
+  //把摘要拼进system消息
+  msgs[0] = {
+    role: "system",
+    content: summary ? `${SYSTEM_PROMPT}\n\n更早对话的摘要（原文已删除）：\n${summary}` : SYSTEM_PROMPT,
+  }
 
 }
 while (true) {
@@ -109,7 +155,7 @@ while (true) {
 
   messages.push({ role: "user", content: input });
   //滑动窗口
-  trimHistory(messages,MAX_TURNS);
+  await trimHistory(messages,MAX_TURNS);
   let steps = 0;
   let res: OpenAI.Chat.Completions.ChatCompletion;
   while (true) {
