@@ -77,14 +77,39 @@ const messages: ChatCompletionMessageParam[] = [
   },
 ];
 
+
 const r1 = readline.createInterface({ input: stdin, output: stdout });
 const MAX_STEPS = 10;
 const MAX_TOOL_CHARS = 4000;
+const MAX_TURNS = 10; // 最多保留最近几轮对话，包括当前这轮
+//滑动窗口方法
+function trimHistory(messages: ChatCompletionMessageParam[], maxTurns: number){
+  // 第一步：找出所有 user 消息的下标
+  const userIdx: number[] = [];
+  for(let i =0;i < messages.length;i++){
+    if (messages[i].role === "user") {
+      userIdx.push(i);
+    }
+  }
+
+   // 第二步：轮数没超就什么都不做
+   if (userIdx.length <= maxTurns) {
+    return;
+   }
+
+   // 第三步：找到"要保留的第一条 user 消息"的下标
+  const keepFrom = userIdx[userIdx.length - maxTurns];
+  // 第四步：删掉 system（下标 0）之后、keepFrom 之前的所有消息
+  messages.splice(1,keepFrom - 1);
+
+}
 while (true) {
   const input = (await r1.question(">")).trim();
   if (!input || input === "exit") break;
 
   messages.push({ role: "user", content: input });
+  //滑动窗口
+  trimHistory(messages,MAX_TURNS);
   let steps = 0;
   let res: OpenAI.Chat.Completions.ChatCompletion;
   while (true) {
