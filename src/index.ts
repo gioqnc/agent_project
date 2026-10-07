@@ -79,6 +79,7 @@ const messages: ChatCompletionMessageParam[] = [
 
 const r1 = readline.createInterface({ input: stdin, output: stdout });
 const MAX_STEPS = 10;
+const MAX_TOOL_CHARS = 4000;
 while (true) {
   const input = (await r1.question(">")).trim();
   if (!input || input === "exit") break;
@@ -104,7 +105,7 @@ while (true) {
       console.log("调用模型失败请重试");
       break;
     }
-
+    console.log(`[token] 第 ${steps} 步，输入 ${res.usage?.prompt_tokens}，输出 ${res.usage?.completion_tokens}`);
     const msg = res.choices[0]?.message;
     if (!msg) {
       break;
@@ -122,13 +123,18 @@ while (true) {
       if (call.type !== "function") {
         continue;
       }
-      const result = await executeTool(
+      console.log(`[tool] ${call.function.name} ${call.function.arguments}`);
+      let result = await executeTool(
         workdir,
         call.function.name,
         call.function.arguments,
         (q) => r1.question(q),
       );
 
+      if (result.length > MAX_TOOL_CHARS) {
+        const total = result.length;
+        result = result.slice(0, MAX_TOOL_CHARS) + `\n...（已截断：共 ${total} 字，只显示前 ${MAX_TOOL_CHARS} 字。需要后面的内容，用 read_file 的 offset 参数从后面的行号继续读）`;
+      }
       messages.push({
         role: "tool",
         tool_call_id: call.id,
