@@ -4,6 +4,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import * as readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { executeTool } from "./tools.js";
+import * as fs from "node:fs" ;
 
 
 const apiKey = process.env.OPENAI_API_KEY;
@@ -72,6 +73,30 @@ const tools = [
 //系统提示词改成常量
 const SYSTEM_PROMPT = "只根据资料目录回答，写明文件路径，文件里没有就说找不到";
 let summary = "";  //更早对话的摘要，一开始是空的
+const SESSION_FILE = "sessions/session.jsonl";
+// 会话文件里的一行：要么是加了一条消息，要么是裁剪了一次
+type SessionEvent =
+  | { type: "message"; message: ChatCompletionMessageParam }
+  | { type: "trim"; count: number; summary: string };
+
+  // 往会话文件末尾追加一行
+function appendEvent(event: SessionEvent) {
+  fs.mkdirSync("sessions", { recursive: true });
+  fs.appendFileSync(SESSION_FILE, JSON.stringify(event) + "\n");
+}
+
+//拼system提示词的函数
+function buildSystemPrompt(){
+  return summary ?
+    `${SYSTEM_PROMPT}\n\n更早对话的摘要（原文已删除）: \n${summary}` : SYSTEM_PROMPT;
+}
+
+//加一条消息：放进messages，同时记进文件
+function addMessage(m: ChatCompletionMessageParam){
+  messages.push(m);
+  appendEvent({type: "message" , message: m});
+}
+
 const messages: ChatCompletionMessageParam[] = [
   {
     role: "system",
@@ -145,19 +170,66 @@ async function trimHistory(msgs: ChatCompletionMessageParam[], maxTurns: number)
   //把摘要拼进system消息
   msgs[0] = {
     role: "system",
-    content: summary ? `${SYSTEM_PROMPT}\n\n更早对话的摘要（原文已删除）：\n${summary}` : SYSTEM_PROMPT,
-  }
+    content: buildSystemPrompt()
+  };
+
+  appendEvent({type : "trim",count : keepFrom -1,summary});
 
 }
+function loadSession() {
+  if (!fs.existsSync(SESSION_FILE)) return;   // 第一次运行，没有会话文件
+
+  // 1. 一行一行重放
+  const lines = fs.readFileSync(SESSION_FILE, "utf8").split("\n");
+  for (const line of lines) {
+    if (!line.trim()) continue;               // 跳过空行
+    let event: SessionEvent;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;                               // 最后一行可能写到一半就崩了，跳过
+    }
+    if (event.type === "message") {
+        messages.push(event.message);                                  // 空位 ③：当时加了这条消息，现在也加回去
+    } else if (event.type === "trim") {
+      messages.splice(1,event.count );                // 空位 ④：当时删了几条，现在就删几条
+      summary = event.summary;
+    }
+  }
+
+  // 2. 修复不完整的结尾：去掉没有结果的工具调用
+  while (messages.length > 1) {
+    const last = messages[messages.length - 1];
+    if (last.role === "tool" || (last.role === "assistant" && last.tool_calls?.length)) {
+      messages.pop();
+    } else {
+      break;
+    }
+  }
+
+  // 3. 把摘要拼回 system 消息
+  messages[0] = { role: "system", content: buildSystemPrompt() };
+
+  // 4. 用修复后的状态重写文件，顺便把文件压缩到最小
+  fs.writeFileSync(SESSION_FILE, "");
+  if (summary) appendEvent({ type: "trim", count: 0, summary });
+  for (const m of messages.slice(1)) appendEvent({ type: "message", message: m });
+
+  console.log(`[session] 恢复了 ${messages.length - 1} 条消息`);
+}
+
+loadSession();
+
 while (true) {
   const input = (await r1.question(">")).trim();
   if (!input || input === "exit") break;
 
-  messages.push({ role: "user", content: input });
+  addMessage({ role: "user", content: input });
   //滑动窗口
   await trimHistory(messages,MAX_TURNS);
   let steps = 0;
   let res: OpenAI.Chat.Completions.ChatCompletion;
+
   while (true) {
     //加步数限制
     if (steps >= MAX_STEPS) {
@@ -182,7 +254,7 @@ while (true) {
       break;
     }
 
-      messages.push(msg);
+      addMessage(msg);
     
 
     const calls = msg.tool_calls;
@@ -206,7 +278,7 @@ while (true) {
         const total = result.length;
         result = result.slice(0, MAX_TOOL_CHARS) + `\n...（已截断：共 ${total} 字，只显示前 ${MAX_TOOL_CHARS} 字。需要后面的内容，用 read_file 的 offset 参数从后面的行号继续读）`;
       }
-      messages.push({
+      addMessage({
         role: "tool",
         tool_call_id: call.id,
         content: result,
