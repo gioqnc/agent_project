@@ -25,6 +25,7 @@ if (!workdir) {
 const SYSTEM_PROMPT = "只根据资料目录回答，写明文件路径，文件里没有就说找不到";
 let summary = ""; //更早对话的摘要，一开始是空的
 const SESSION_FILE = "sessions/session.jsonl";
+const TRACE_FILE = "traces/trace.jsonl";
 // 会话文件里的一行：要么是加了一条消息，要么是裁剪了一次
 type SessionEvent =
   | { type: "message"; message: ChatCompletionMessageParam }
@@ -203,6 +204,7 @@ while (true) {
   addMessage({ role: "user", content: input });
   //滑动窗口
   await trimHistory(messages, MAX_TURNS);
+  const start = Date.now();
   const result = await runAgent(
     {
       client,
@@ -216,6 +218,23 @@ while (true) {
 
     },
     messages,
+  );
+
+  // 每次问答追加一条轨迹，评测和排查问题都用它
+  const totalTokens = result.trace.reduce(
+    (sum, s) => sum + s.promptTokens + s.completionTokens,
+    0,
+  );
+  fs.mkdirSync("traces", { recursive: true });
+  fs.appendFileSync(
+    TRACE_FILE,
+    JSON.stringify({
+      time: new Date().toISOString(),
+      question: input,
+      ms: Date.now() - start,
+      totalTokens,
+      ...result,
+    }) + "\n",
   );
 
   if (result.stopReason === "done") {

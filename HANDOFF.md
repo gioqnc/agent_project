@@ -2,7 +2,7 @@
 
 把本文交给另一台电脑上的 AI 即可继续。`.env` 已被 gitignore，拷代码后必须单独带配置，**不要把 API Key 写进本文或任何会提交的文件**。
 
-最近一次更新：2026-10-11（第 4 阶段内核重构完成；路线定为 3 到 7 阶段：通用 Agent 内核 + 有评测数据的具体场景；RAG 用 Python 服务通过 MCP 接入；见「阶段」一节）。
+最近一次更新：2026-10-11（第 4 阶段内核重构、运行轨迹完成；路线定为 3 到 7 阶段：通用 Agent 内核 + 有评测数据的具体场景；RAG 用 Python 服务通过 MCP 接入；见「阶段」一节）。
 
 ---
 
@@ -110,7 +110,7 @@
 | 第 1 阶段 | CLI + 手写循环 + `search_files` + `read_file` | 三个只读任务能自主搜、读、答，不用逐步指挥 | — | **已完成**，讲解关已过 |
 | 第 2 阶段 | `write_note` 接入 + 最大步数 + API 错误处理 + 清理已知问题 | 写入前必须确认；死循环和网络错误不会让进程崩溃 | — | **主体完成**（10/6），剩 3 个清理项放到"零碎" |
 | 第 3 阶段 | 上下文与会话：usage 打印、工具输出截断、滑动窗口、摘要压缩、JSONL 会话持久化 | 长对话、失败、重启后的行为都能讲清楚 | 10 月底 | **已完成**（10/9：JSONL 会话持久化测试通过，讲解关已过） |
-| 第 4 阶段 | **内核重构 + 运行轨迹 + 评测**：循环抽成 `runAgent(配置)`，配置包括 system 提示词、工具列表、步数上限、`ask`；每次问答记一条 JSONL 轨迹（每步工具调用、参数、token、耗时、最终回答）；30 道评测题，每题写标准答案和应引用的文件；脚本自动跑、自动判对错和出处，失败按原因分类。现在的关键词搜索作为**基线** | 一条命令跑完评测，输出成功率、编造率、出处命中率、平均 token 和耗时 | 11 月中 | **进行中**（10/11：内核重构完成，讲解关已过） |
+| 第 4 阶段 | **内核重构 + 运行轨迹 + 评测**：循环抽成 `runAgent(配置)`，配置包括 system 提示词、工具列表、步数上限、`ask`；每次问答记一条 JSONL 轨迹（每步工具调用、参数、token、耗时、最终回答）；30 道评测题，每题写标准答案和应引用的文件；脚本自动跑、自动判对错和出处，失败按原因分类。现在的关键词搜索作为**基线** | 一条命令跑完评测，输出成功率、编造率、出处命中率、平均 token 和耗时 | 11 月中 | **进行中**（10/11：内核重构、运行轨迹完成，讲解关已过；剩评测） |
 | 第 5 阶段 | **RAG 检索服务（Python + MCP）**：Python 写独立检索服务，对外只暴露一个 `search_knowledge(query)` 工具；内部做分块、方舟 embedding、内存里算向量相似度、`jieba` 分词的关键词检索、混合检索；先用 MCP 的 stdio 方式本地接入，TS 内核里实现 MCP 客户端；用评测对比关键词搜索基线 | 混合检索相对基线有前后对比数据；Agent 不改循环就能换检索实现 | 12 月 | 未开始 |
 | 第 6 阶段 | **子 Agent 委派（多智能体）**：主 Agent 用一个委派工具，把"要读很多资料"的子任务交给子 Agent；子 Agent 用同一个 `runAgent`、不同的 system 提示词和工具，在独立上下文里搜、读、总结，只把结论交回主 Agent；用评测对比单 Agent 和多 Agent 的准确率和 token | 有单 / 多 Agent 的对比数据，能讲清楚什么时候该委派 | 2027 年 1 月 | 未开始 |
 | 第 7 阶段 | **个人分身应用 + 安全 + 部署**：知识库换成用户本人资料；Node HTTP + SSE + 流式输出 + 简单聊天页（展示工具调用和出处）；限流、每日 token 上限、输入长度限制；**提示词注入防御**（含资料里藏恶意指令的间接注入），用评测证明效果；Docker + 已有服务器 + HTTPS，检索服务一起部署，MCP 换成 HTTP 方式 | 公网可以访问；注入题攻击成功率有前后对比数据 | 2027 年 2 月 | 未开始 |
@@ -422,7 +422,9 @@ N、X、Y、A、B、P、Q、R 都必须写真实数字，没做到的那一行�
 
 ---
 
-**当前进度（2026-10-11）：** **第 4 阶段第一步：内核重构完成。** 循环抽到 `src/agent.ts` 的 `runAgent(config, messages)`，返回 `{ answer, stopReason: "done" | "max_steps" | "error", steps }`；`AgentConfig` 含 `client`、`model`、`tools`、`maxSteps`、`maxToolChars`、`workdir`、`ask`、可选的 `onMessage`。`runAgent` 内部 `add` = push + `config.onMessage?.(m)`；CLI 传 `onMessage: (m) => appendEvent({ type: "message", message: m })`（只写文件不 push，否则重复）。子 Agent、评测脚本不传 `onMessage`，不碰会话文件。工具 schema 挪到 `tools.ts` 的 `export const TOOLS: ChatCompletionTool[]`。`trimHistory`、会话持久化仍留在 `index.ts`（CLI 专属）。实测：行为和重构前一致，会话文件无重复，`MAX_STEPS=1` 时打印步数用完。讲解关 5 题已过（study_notes `面试问题.md` 讲 31～35）。**下一步**：运行轨迹。`AgentResult` 加 `trace` 字段（每步：工具名、参数、结果长度、token、耗时），每次问答追加一条 JSONL；之后写 30 道评测题和跑分脚本。
+**当前进度（2026-10-11 晚）：** **第 4 阶段：内核重构、运行轨迹完成，剩评测。** 轨迹：`agent.ts` 加 `ToolTrace`（name、args、resultChars 截断前长度、truncated、ms）和 `StepTrace`（step、modelMs、promptTokens、completionTokens、tools）；`AgentResult` 加 `trace` 和可选 `error`（出错原因）。`index.ts` 每次问答往 `traces/trace.jsonl` 追加一行（time、question、ms、totalTokens、`...result`），`traces/` 已 gitignore。实测全新会话 4 步，第 1 次 `search_files` 返回"没有匹配"（resultChars 4），换词后命中；恢复会话后再问同一题是 1 步、不调工具。已知：`write_note` 的 `ms` 含等用户确认的时间，评测不受影响，暂不改。讲解关 5 题已过（`面试问题.md` 讲 36～40）。**下一步**：评测。30 道题（正常、读多篇、资料里没有、诱导编造、注入），每题写标准答案关键值和应引用的文件；脚本每题传**全新 `messages`**、不传 `onMessage`、`ask` 自动回答 n，规则判分，输出成功率、编造率、出处命中率、平均 token 和耗时、失败分类。评测脚本由 AI 写，用户过讲解关；题目要留一部分不拿来调提示词。
+
+上一版进度（2026-10-11 下午）： **第 4 阶段第一步：内核重构完成。** 循环抽到 `src/agent.ts` 的 `runAgent(config, messages)`，返回 `{ answer, stopReason: "done" | "max_steps" | "error", steps }`；`AgentConfig` 含 `client`、`model`、`tools`、`maxSteps`、`maxToolChars`、`workdir`、`ask`、可选的 `onMessage`。`runAgent` 内部 `add` = push + `config.onMessage?.(m)`；CLI 传 `onMessage: (m) => appendEvent({ type: "message", message: m })`（只写文件不 push，否则重复）。子 Agent、评测脚本不传 `onMessage`，不碰会话文件。工具 schema 挪到 `tools.ts` 的 `export const TOOLS: ChatCompletionTool[]`。`trimHistory`、会话持久化仍留在 `index.ts`（CLI 专属）。实测：行为和重构前一致，会话文件无重复，`MAX_STEPS=1` 时打印步数用完。讲解关 5 题已过（study_notes `面试问题.md` 讲 31～35）。**下一步**：运行轨迹。`AgentResult` 加 `trace` 字段（每步：工具名、参数、结果长度、token、耗时），每次问答追加一条 JSONL；之后写 30 道评测题和跑分脚本。
 
 上一版进度（2026-10-09）： **第 3 阶段完成。** JSONL 会话持久化已实测：问两个问题、exit、重启后能接着聊；手动加一行坏 JSON 能跳过并被重写掉。讲解关 12 题已过（记在 study_notes `面试问题.md` 讲 19～30）。讲解关里补的改动：`loadSession` 重写文件改成**先写 `session.jsonl.tmp` 再 `fs.renameSync` 原子替换**，原来"先清空再逐行追加"在中途崩溃会丢掉全部历史；`write_note` 的 schema 属性名 `writeContent` 改成 `content`，和 `required`、`tools.ts` 一致。已知可选改进：加 `/new` 命令清空会话（现在只能删文件）。**下一步**：进入第 4 阶段，先做内核重构，把循环抽成 `runAgent(配置)`。
 
