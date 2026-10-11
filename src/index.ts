@@ -3,8 +3,9 @@ import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import * as readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { executeTool } from "./tools.js";
 import * as fs from "node:fs";
+import {TOOLS} from "./tools.js";
+import { runAgent } from "./agent.js";
 
 const apiKey = process.env.OPENAI_API_KEY;
 const baseURL = process.env.OPENAI_BASE_URL;
@@ -19,57 +20,7 @@ if (!workdir) {
   throw new Error("缺少资料目录");
 }
 
-//定义工具数组
-const tools = [
-  {
-    type: "function" as const,
-    function: {
-      name: "search_files",
-      description: "在资料目录中按文件名和正文关键词搜索",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string" },
-        },
-        required: ["query"],
-      },
-    },
-  },
 
-  {
-    type: "function" as const,
-    function: {
-      name: "read_file",
-      description: "在资料目录中按文件名读取",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string" },
-          offset: { type: "number" },
-          limit: { type: "number" },
-        },
-        required: ["path"],
-      },
-    },
-  },
-
-  {
-    type: "function" as const,
-    function: {
-      name: "write_note",
-      description:
-        "把内容写入一个 Markdown 文件。path 必须以 output/ 开头，比如 output/cheatsheet.md。写入前会请用户确认。", // 告诉模型这个工具干什么、只能写到哪个目录
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string" }, // 文件路径，参数名要和后面取值时一致
-          content: { type: "string" }, // 要写入的内容
-        },
-        required: ["path", "content"], // 两个都必填
-      },
-    },
-  },
-];
 //系统提示词改成常量
 const SYSTEM_PROMPT = "只根据资料目录回答，写明文件路径，文件里没有就说找不到";
 let summary = ""; //更早对话的摘要，一开始是空的
@@ -252,66 +203,27 @@ while (true) {
   addMessage({ role: "user", content: input });
   //滑动窗口
   await trimHistory(messages, MAX_TURNS);
-  let steps = 0;
-  let res: OpenAI.Chat.Completions.ChatCompletion;
+  const result = await runAgent(
+    {
+      client,
+      model,
+      tools: TOOLS,
+      maxSteps: MAX_STEPS,
+      maxToolChars: MAX_TOOL_CHARS,
+      workdir,
+      ask: (q)=> r1.question(q),
+      onMessage: (m) => appendEvent({type: "message",message: m})
 
-  while (true) {
-    //加步数限制
-    if (steps >= MAX_STEPS) {
-      console.log("调用超过最大次数限制，请重试");
-      break;
-    }
-    steps++;
+    },
+    messages,
+  );
 
-    try {
-      res = await client.chat.completions.create({
-        model,
-        messages,
-        tools,
-      });
-    } catch (error) {
-      console.log("调用模型失败请重试");
-      break;
-    }
-    console.log(
-      `[token] 第 ${steps} 步，输入 ${res.usage?.prompt_tokens}，输出 ${res.usage?.completion_tokens}`,
-    );
-    const msg = res.choices[0]?.message;
-    if (!msg) {
-      break;
-    }
-
-    addMessage(msg);
-
-    const calls = msg.tool_calls;
-    if (!calls || calls.length === 0) {
-      console.log(msg.content);
-      break;
-    }
-    for (const call of calls) {
-      if (call.type !== "function") {
-        continue;
-      }
-      console.log(`[tool] ${call.function.name} ${call.function.arguments}`);
-      let result = await executeTool(
-        workdir,
-        call.function.name,
-        call.function.arguments,
-        (q) => r1.question(q),
-      );
-
-      if (result.length > MAX_TOOL_CHARS) {
-        const total = result.length;
-        result =
-          result.slice(0, MAX_TOOL_CHARS) +
-          `\n...（已截断：共 ${total} 字，只显示前 ${MAX_TOOL_CHARS} 字。需要后面的内容，用 read_file 的 offset 参数从后面的行号继续读）`;
-      }
-      addMessage({
-        role: "tool",
-        tool_call_id: call.id,
-        content: result,
-      });
-    }
+  if (result.stopReason === "done") {
+    console.log(result.answer);
+  }else if (result.stopReason === "max_steps") {
+    console.log("调用超过最大次数限制，请重试");
+  }else{
+    console.log("调用模型失败请重试");
   }
 }
 
