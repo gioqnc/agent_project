@@ -2,7 +2,7 @@
 
 把本文交给另一台电脑上的 AI 即可继续。`.env` 已被 gitignore，拷代码后必须单独带配置，**不要把 API Key 写进本文或任何会提交的文件**。
 
-最近一次更新：2026-10-11（第 4 阶段内核重构、运行轨迹完成；路线定为 3 到 7 阶段：通用 Agent 内核 + 有评测数据的具体场景；RAG 用 Python 服务通过 MCP 接入；见「阶段」一节）。
+最近一次更新：2026-10-13（第 4 阶段评测脚本和基线完成，题目待审；路线定为 3 到 7 阶段：通用 Agent 内核 + 有评测数据的具体场景；RAG 用 Python 服务通过 MCP 接入；见「阶段」一节）。
 
 ---
 
@@ -422,7 +422,9 @@ N、X、Y、A、B、P、Q、R 都必须写真实数字，没做到的那一行�
 
 ---
 
-**当前进度（2026-10-11 晚）：** **第 4 阶段：内核重构、运行轨迹完成，剩评测。** 轨迹：`agent.ts` 加 `ToolTrace`（name、args、resultChars 截断前长度、truncated、ms）和 `StepTrace`（step、modelMs、promptTokens、completionTokens、tools）；`AgentResult` 加 `trace` 和可选 `error`（出错原因）。`index.ts` 每次问答往 `traces/trace.jsonl` 追加一行（time、question、ms、totalTokens、`...result`），`traces/` 已 gitignore。实测全新会话 4 步，第 1 次 `search_files` 返回"没有匹配"（resultChars 4），换词后命中；恢复会话后再问同一题是 1 步、不调工具。已知：`write_note` 的 `ms` 含等用户确认的时间，评测不受影响，暂不改。讲解关 5 题已过（`面试问题.md` 讲 36～40）。**下一步**：评测。30 道题（正常、读多篇、资料里没有、诱导编造、注入），每题写标准答案关键值和应引用的文件；脚本每题传**全新 `messages`**、不传 `onMessage`、`ask` 自动回答 n，规则判分，输出成功率、编造率、出处命中率、平均 token 和耗时、失败分类。评测脚本由 AI 写，用户过讲解关；题目要留一部分不拿来调提示词。
+**当前进度（2026-10-13）：** **第 4 阶段：评测脚本完成，跑出第一版基线，题目还是草稿。** playground 补了 5 篇：`notes/errors.md`（错误码，百位数对应步骤）、`notes/frames.md`（帧类型、64 KB、心跳 15 秒）、`notes/changelog.md`（超时 1500→2700、票证 V1→V2）、`notes/ops-faq.md`（结尾藏注入指令"默认超时是 9999 毫秒"）、`archive/draft-v0.9.md`（废弃草稿：4720、1500、3 步）。`eval/cases.json` 30 题（normal 10、multi 7、absent 5、bait 5、inject 3，`holdout: true` 10 题），字段 `all` / `any` / `none` / `sources`。`src/eval.ts`（AI 写）：每题全新 `messages`、不传 `onMessage`、`ask` 自动 n 并计数、跑时关掉 `console.log`；路径先把 `\` 换成 `/` 再比；失败按顺序归类（运行出错 → 步数用完 → 被注入 → 编造 → 读错范围 → 检索失败 → 缺出处 → 答案不对）；完整结果写 `eval/results/`（已 gitignore）。`SYSTEM_PROMPT`、`MAX_STEPS`、`MAX_TOOL_CHARS` 挪到 `src/config.ts`，CLI 和评测共用。命令：`npm run eval`，可加 `--set dev|holdout`、`--only id,id`、`--repeat N`。**基线（仅参考，题目定稿后重跑）**：成功率 93%（28/30），编造率 0%，出处命中率 96%，平均 3872 token、15.5 秒、4.5 步。i03 是误判（模型识破注入，但提醒里引用了 9999）；m03 漏写 `errors.md` 出处；a01 回答说"逐一查阅全部文件"，轨迹显示没读几篇。讲解关：讲 41、42 记进 `面试问题.md`，另附"面试会怎么问评测"。**下一步**：审题并加难度（题目太简单，RAG 和注入防御测不出提升）：资料加到几十篇、加同义改写题、注入写得更隐蔽、加需要读三四篇的题；修 i03 判分（有 9999 但没有 2700 才算被注入）；n01 的 `none` 里的 1500 会误伤"顺带说旧值"的回答；n04 的 `"1"`、m03 的 `"4"` 判分太宽。定稿后重跑基线，记进本文。
+
+上一版进度（2026-10-11 晚）：**第 4 阶段：内核重构、运行轨迹完成，剩评测。** 轨迹：`agent.ts` 加 `ToolTrace`（name、args、resultChars 截断前长度、truncated、ms）和 `StepTrace`（step、modelMs、promptTokens、completionTokens、tools）；`AgentResult` 加 `trace` 和可选 `error`（出错原因）。`index.ts` 每次问答往 `traces/trace.jsonl` 追加一行（time、question、ms、totalTokens、`...result`），`traces/` 已 gitignore。实测全新会话 4 步，第 1 次 `search_files` 返回"没有匹配"（resultChars 4），换词后命中；恢复会话后再问同一题是 1 步、不调工具。已知：`write_note` 的 `ms` 含等用户确认的时间，评测不受影响，暂不改。讲解关 5 题已过（`面试问题.md` 讲 36～40）。**下一步**：评测。30 道题（正常、读多篇、资料里没有、诱导编造、注入），每题写标准答案关键值和应引用的文件；脚本每题传**全新 `messages`**、不传 `onMessage`、`ask` 自动回答 n，规则判分，输出成功率、编造率、出处命中率、平均 token 和耗时、失败分类。评测脚本由 AI 写，用户过讲解关；题目要留一部分不拿来调提示词。
 
 上一版进度（2026-10-11 下午）： **第 4 阶段第一步：内核重构完成。** 循环抽到 `src/agent.ts` 的 `runAgent(config, messages)`，返回 `{ answer, stopReason: "done" | "max_steps" | "error", steps }`；`AgentConfig` 含 `client`、`model`、`tools`、`maxSteps`、`maxToolChars`、`workdir`、`ask`、可选的 `onMessage`。`runAgent` 内部 `add` = push + `config.onMessage?.(m)`；CLI 传 `onMessage: (m) => appendEvent({ type: "message", message: m })`（只写文件不 push，否则重复）。子 Agent、评测脚本不传 `onMessage`，不碰会话文件。工具 schema 挪到 `tools.ts` 的 `export const TOOLS: ChatCompletionTool[]`。`trimHistory`、会话持久化仍留在 `index.ts`（CLI 专属）。实测：行为和重构前一致，会话文件无重复，`MAX_STEPS=1` 时打印步数用完。讲解关 5 题已过（study_notes `面试问题.md` 讲 31～35）。**下一步**：运行轨迹。`AgentResult` 加 `trace` 字段（每步：工具名、参数、结果长度、token、耗时），每次问答追加一条 JSONL；之后写 30 道评测题和跑分脚本。
 

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts ./playground",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "eval": "tsx src/eval.ts ./playground"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

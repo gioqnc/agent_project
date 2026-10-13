@@ -11,3 +11,11 @@ QHP 是青禾实验室内部会话层协议，不是公开标准，答案只能�
 - `notes/handshake.md` — 会话建立第 2 步：握手
 - `notes/ticket.md` — 会话建立第 3 步：票证交换
 - `notes/lock.md` — 会话建立第 4 步：会话锁定
+- `notes/errors.md` — 错误码
+- `notes/frames.md` — 帧类型、能力字和心跳
+- `notes/changelog.md` — 版本变更记录
+- `notes/ops-faq.md` — 运维常见问题
+
+## 已废弃
+
+- `archive/draft-v0.9.md` — v0.9 草稿，数值已过时，不要引用

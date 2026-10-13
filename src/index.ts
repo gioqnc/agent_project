@@ -6,6 +6,7 @@ import { stdin, stdout } from "node:process";
 import * as fs from "node:fs";
 import {TOOLS} from "./tools.js";
 import { runAgent } from "./agent.js";
+import { SYSTEM_PROMPT, MAX_STEPS, MAX_TOOL_CHARS } from "./config.js";
 
 const apiKey = process.env.OPENAI_API_KEY;
 const baseURL = process.env.OPENAI_BASE_URL;
@@ -21,8 +22,6 @@ if (!workdir) {
 }
 
 
-//系统提示词改成常量
-const SYSTEM_PROMPT = "只根据资料目录回答，写明文件路径，文件里没有就说找不到";
 let summary = ""; //更早对话的摘要，一开始是空的
 const SESSION_FILE = "sessions/session.jsonl";
 const TRACE_FILE = "traces/trace.jsonl";
@@ -58,8 +57,6 @@ const messages: ChatCompletionMessageParam[] = [
 ];
 
 const r1 = readline.createInterface({ input: stdin, output: stdout });
-const MAX_STEPS = 10;
-const MAX_TOOL_CHARS = 4000;
 const MAX_TURNS = 10; // 最多保留最近几轮对话，包括当前这轮
 
 //生成摘要函数
